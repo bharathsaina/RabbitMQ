@@ -1,0 +1,89 @@
+RabbitMQ Cluster
+
+
+-> how rabbitmq node identifier will identify the nodes: <prefix>@<Hostname>
+                                                         rare@rabbit-1
+
+-> important ports: 15672 => RabbitMQ MAnagement UI 
+                     5672 => RabbitMQ AMQP Client 
+                     4369 => Discovery daemon used by RabbitMQ Nodes
+
+-> Install docker on ubuntu server: 
+sudo apt update
+sudo apt upgrade
+sudo apt install docker.io -y
+sudo systemctl enable --now docker
+
+-> create docker network: 
+sudo usermod -aG docker ${USER} => add user to docker group (docker permission)
+journalctl -u docker.service => inspect error logs
+sudo docker network create mynetwork => create network
+
+-> create containers:
+docker run -d --rm --net rabbits --hostname rabbit-1 --name rabbit-1 -p 8081:15672 rabbitmq:3.8-management
+
+create containers with erlang coockies:
+docker run -d --rm --net rabbits -p 8080:15672 -e RABBITMQ_ERLANG_COOKIE=DSHEVCXBBETJJVJWTOWT --hostname rabbit-manager --name rabbit-manager rabbitmq:3.8-management
+
+#join the manager
+
+docker exec -it rabbit-manager rabbitmqctl stop_app
+docker exec -it rabbit-manager rabbitmqctl reset
+docker exec -it rabbit-manager rabbitmqctl join_cluster rabbit@rabbit-1
+docker exec -it rabbit-manager rabbitmqctl start_app
+docker exec -it rabbit-manager rabbitmqctl cluster_status
+
+
+
+-> SETUP RABBITMQ CLUSTER WITH MULTIPLE VMS:
+
+launch ec2 instances and connect
+update packages: sudo su -
+                 apt update
+add hosts in /etc/hosts: vi /etc/hosts
+                         and paste all the instances private ip and hostname 
+                         do this on all instances
+update packages: apt update
+create hostname on all the instances: sudo hostnamectl set-hostname <name> --static 
+update packages: apt update
+reboot the server: reboot
+                   sudo su -
+install erlang: go to rabbitmq => doc => Debian and ubuntu
+                copy code and paste in "vi 1.sh"
+                run script : sh 1.sh
+                repeat this on all instances
+
+check the version and server status: erl
+                                     rabbitmqctl version
+                                     systemctl status rabbitmq-server
+
+copy the erlang cookie:  nano /var/lib/rabbitmq/.erlang.cookie
+IIYOGXSUZXVNZCULWEOH   EEHDVOJJOYYLZHQAVKKH
+restart the node services:  rabbitmqctl stop_app
+                            rabbitmqctl reset
+                            rabbitmqctl join_cluster rabbit@rabbit-1
+                            rabbitmqctl start_app
+                            rabbitmqctl cluster_status 
+
+add new rabbitmq-user:
+                     sudo rabbitmqctl add_user <name> <passwrd> 
+                     sudo rabbitmqctl set_user_tags <user_name> administrator
+                     sudo rabbitmqctl set_permissions -p / bharath ".*" ".*" ".*"
+
+
+set policy: sudo rabbitmqctl set_policy ha-all ".*" '{"ha-mode":"all"}'
+            sudo rabbitmqctl list_policies 
+            sudo rabbitmq-plugins enable rabbitmq_management 
+            sudo ufw allow proto tcp from any to any port 15672
+
+enable rabbitmq federation on each instances:
+                        rabbitmq-plugins enable rabbitmq_federation
+
+mirroring: 
+rabbitmqctl set_policy ha-fed \
+    ".*" '{"federation-upstream-set":"all", "ha-sync-mode":"automatic", "ha-mode":"nodes", "ha-params":["rabbit@rabbit-1","rabbit@rabbit-2","rabbit@rabbit-3"]}' \
+    --priority 1 \
+    --apply-to queues
+                        
+
+
